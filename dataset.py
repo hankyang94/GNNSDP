@@ -4,6 +4,13 @@ from torch_geometric.data import Dataset, Data
 import os.path as osp
 import scipy.io as sio
 
+def gen_index_map(ud_edges,n):
+    map = np.zeros((n,n),dtype=np.int16)
+    for i, edge in enumerate(ud_edges):
+        map[edge[0],edge[1]] = i
+        map[edge[1],edge[0]] = i
+    return map
+
 class QUASARDataset(Dataset):
     def __init__(self, root, transform=None, pre_transform=None, pre_filter=None):
         super().__init__(root, transform, pre_transform, pre_filter)
@@ -57,11 +64,16 @@ class QUASARDataset(Dataset):
                 ud_edges        = torch.triu(
                     torch.ones(num_nodes+1,num_nodes+1) - torch.eye(num_nodes+1)).nonzero().t().contiguous()
                 ud_edges        = ud_edges.t().tolist()
+                edge_map        = gen_index_map(ud_edges,num_nodes+1)
                 y               = torch.stack((torch.tensor(Xopt,dtype=torch.float64),
                                                torch.tensor(Sopt,dtype=torch.float64),
                                                torch.tensor(Aty,dtype=torch.float64)))
 
-                graph           = Data(x=node_features,edge_index=edge_index,y=y,ud_edges=ud_edges)
+                graph           = Data(x=node_features,
+                                       edge_index=edge_index,
+                                       y=y,
+                                       ud_edges=ud_edges,
+                                       edge_map=edge_map)
 
                 torch.save(graph,osp.join(self.processed_dir,f'data_{count}.pt'))
                 count += 1
@@ -71,6 +83,7 @@ class QUASARDataset(Dataset):
 
     def get(self,idx):
         return torch.load(osp.join(self.processed_dir,f'data_{idx}.pt'))
+
 
     # def primal_vec(X):
     #     # expect X to be numpy array of size (4N+4,4N+4)
