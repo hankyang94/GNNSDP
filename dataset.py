@@ -12,10 +12,11 @@ def gen_index_map(ud_edges,n):
     return map
 
 class QUASARDataset(Dataset):
-    def __init__(self, root, transform=None, pre_transform=None, pre_filter=None):
+    def __init__(self, root, num_graphs, transform=None, pre_transform=None, pre_filter=None):
         super().__init__(root, transform, pre_transform, pre_filter)
         # self.raw_dir = osp.join(root,'raw')
         # self.processed_dir = osp.join(root,'processed')
+        self.num_graphs = num_graphs
 
     @property
     def raw_file_names(self):
@@ -24,7 +25,7 @@ class QUASARDataset(Dataset):
     @property
     def processed_file_names(self):
         names = []
-        for i in range(1000):
+        for i in range(self.num_graphs):
             names.append(f'data_{i}.pt')
         return names
 
@@ -33,7 +34,10 @@ class QUASARDataset(Dataset):
 
     def process(self):
         count = 0
+        stop = False
         for raw_file_name in self.raw_file_names:
+            if stop:
+                break
             # load the .mat file
             file = osp.join(self.raw_dir,raw_file_name) 
             raw_data = sio.loadmat(file)['log_data']
@@ -76,6 +80,9 @@ class QUASARDataset(Dataset):
                                        edge_map=edge_map)
 
                 torch.save(graph,osp.join(self.processed_dir,f'data_{count}.pt'))
+                if count == self.num_graphs - 1:
+                    stop = True
+                    break
                 count += 1
     
     def len(self):
