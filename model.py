@@ -150,7 +150,7 @@ class ModelS(nn.Module):
         #                   [x[3],x[6],x[8],x[9]]],dtype=torch.float64)
         if x.size(dim=0) != 10:
             raise RuntimeError('smat only accepts 10-D vector.')
-        idx = torch.tensor([0,1,2,3,1,4,5,6,2,5,7,8,3,6,8,9])
+        idx = torch.tensor([0,1,2,3,1,4,5,6,2,5,7,8,3,6,8,9],device=x.device)
         X   = x[idx].view(4,4) 
         return X
 
@@ -166,8 +166,8 @@ class ModelS(nn.Module):
         #                   [-x[0],0,x[3],x[4]], 
         #                   [-x[1],-x[3],0,x[5]], 
         #                   [-x[2],-x[4],-x[5],0]],dtype=torch.float64)
-        zero = torch.tensor([0],dtype=torch.float64)
-        nega = torch.tensor([-1],dtype=torch.float64)
+        zero = torch.tensor([0],dtype=torch.float64,device=x.device)
+        nega = torch.tensor([-1],dtype=torch.float64,device=x.device)
         vec  = torch.cat([zero, 
                           nega*x[0:3],
                           x[0:1], 
