@@ -7,7 +7,7 @@ from dataset import QUASARDataset
 
 # Supervised GNN model
 class ModelS(nn.Module):
-    def __init__(self, mp_input_dim=6,
+    def __init__(self, node_feature_mode=1,
                        mp_hidden_dim=32,
                        mp_output_dim=64,
                        mp_num_layers=1, 
@@ -23,6 +23,16 @@ class ModelS(nn.Module):
                        edge_mlp_num_layers=1, 
                        dropout_rate=0.2):
         super(ModelS,self).__init__()
+        if node_feature_mode == 1:
+            mp_input_dim = 6 # use original point coordinates
+        elif node_feature_mode == 2:
+            mp_input_dim = 10 # use entries of cost matrix C
+        elif node_feature_mode == 3:
+            mp_input_dim = 16 # use both
+        else:
+            raise RuntimeError('node_feature_mode can only be 1, 2, or 3.')
+        self.node_feature_mode = node_feature_mode
+        print(f'Model: node_feature_mode = {node_feature_mode}, mp_input_dim = {mp_input_dim}.')
         # Message passing
         self.mp_convs = nn.ModuleList()
         self.mp_convs.append(pyg_nn.SAGEConv(mp_input_dim,mp_hidden_dim))
@@ -73,25 +83,43 @@ class ModelS(nn.Module):
             raise RuntimeError('dual_edge_mlp_output_dim must be 16 or 6.')
 
     def forward(self,data):
-        x, edge_index, batch = data.x, data.edge_index, data.batch
-        num_nodes = data.num_nodes
-        ud_edges  = data.ud_edges
-        edge_map  = data.edge_map
+        x, edge_index = data.x, data.edge_index
+        ptr, edge_map, ud_edges = data.ptr, data.edge_map, data.ud_edges
+        if self.node_feature_mode == 1:
+            x = x[:,0:6] # use point coordinates
+        elif self.node_feature_mode == 2:
+            x = x[:,6:] # use cost matrix entries
+
         # Message passing
         for mp_layer in self.mp_convs:
             x = mp_layer(x,edge_index)
             x = F.relu(x)
-            x = F.dropout(x,p=self.dropout_rate,training=self.training)
+            # x = F.dropout(x,p=self.dropout_rate,training=self.training)
         
         # Post message passing
-        # Primal node
+        num_graphs = data.num_graphs
+        X = []
+        S = []
+        Aty = []
+        for k in range(num_graphs):
+            node_id = torch.arange(ptr[k],ptr[k+1])
+            Xk, Sk, Atyk = self.post_mp_one_graph(x[node_id,:],ud_edges[k],edge_map[k])
+            X.append(Xk)
+            S.append(Sk)
+            Aty.append(Atyk)
+        
+        return X, S, Aty
+
+    
+    def post_mp_one_graph(x,ud_edges,edge_map):
+        num_nodes = x.shape[0]
         vp = []
         for i in range(num_nodes):
             xi = x[i,:] # feature of i-th node
             for mlp_layer in self.primal_node_mlp:
                 xi = mlp_layer(xi)
                 xi = F.relu(xi)
-                xi = F.dropout(xi,p=self.dropout_rate,training=self.training)
+                # xi = F.dropout(xi,p=self.dropout_rate,training=self.training)
             vp.append(xi)
         vp = torch.stack(vp) # num_nodes x primal_node_mlp_output_dim
         # Dual node
@@ -101,7 +129,7 @@ class ModelS(nn.Module):
             for mlp_layer in self.dual_node_mlp:
                 xi = mlp_layer(xi)
                 xi = F.relu(xi)
-                xi = F.dropout(xi,p=self.dropout_rate,training=self.training)
+                # xi = F.dropout(xi,p=self.dropout_rate,training=self.training)
             vd.append(xi)
         vd = torch.stack(vd) # num_nodes x dual_node_mlp_output_dim
         # Primal edge
@@ -113,7 +141,7 @@ class ModelS(nn.Module):
             for mlp_layer in self.primal_edge_mlp:
                 xij = mlp_layer(xij)
                 xij = F.relu(xij)
-                xij = F.dropout(xij,p=self.dropout_rate,training=self.training)
+                # xij = F.dropout(xij,p=self.dropout_rate,training=self.training)
             ep.append(xij)
         ep = torch.stack(ep)
         # Dual edge
@@ -125,7 +153,7 @@ class ModelS(nn.Module):
             for mlp_layer in self.dual_edge_mlp:
                 xij = mlp_layer(xij)
                 xij = F.relu(xij)
-                xij = F.dropout(xij,p=self.dropout_rate,training=self.training)
+                # xij = F.dropout(xij,p=self.dropout_rate,training=self.training)
             ed.append(xij)
         ed = torch.stack(ed)
 
@@ -141,7 +169,8 @@ class ModelS(nn.Module):
         else:
             raise RuntimeError(f'dual_edge_mlp_output_dim = {dual_edge_mlp_output_dim} not supported.')
 
-        return x, X, S, Aty
+        return X, S, Aty
+
 
     def smat(self,x):
         # X = torch.tensor([[x[0],x[1],x[2],x[3]],
@@ -243,9 +272,17 @@ class ModelS(nn.Module):
         return Aty
 
     def loss(self,data,X,S,Aty):
-        y = data.y
+        num_graphs = data.num_graphs
+        loss = []
+        Xopt = data.X
+        Sopt = data.S
+        Atyopt = data.Aty
         if self.dual_edge_mlp_output_dim == 16:
-            loss = torch.norm(X - y[0,:,:],p='fro') + torch.norm(S - y[1,:,:],p='fro')
+            for i in range(num_graphs):
+                loss.append(
+                    torch.norm(X[i] - Xopt[i],p='fro') + torch.norm(S[i] - Sopt[i],p='fro'))
         elif self.dual_edge_mlp_output_dim == 6:
-            loss = torch.norm(X - y[0,:,:],p='fro') + torch.norm(Aty - y[2,:,:],p='fro')
-        return loss
+            for i in range(num_graphs):
+                loss.append(
+                    torch.norm(X[i] - Xopt[i],p='fro') + torch.norm(Aty[i] - Atyopt[i],p='fro'))
+        return torch.mean(torch.tensor(loss))

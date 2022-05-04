@@ -8,6 +8,7 @@ __pycache__/
 
 # tf logs
 log/
+models/
 
 # Distribution / packaging
 .Python
