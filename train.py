@@ -37,11 +37,13 @@ def train(dataset,writer,batch_size,num_epoches):
             opt.zero_grad()
             batch.to(device)
             X, S, Aty = model(batch)
+            # print(X[0])
             loss = model.loss(batch,X,S,Aty)
+
             loss.backward()
             opt.step()
             total_loss += loss.item() * batch.num_graphs
-            print('graph {}. loss: {:.4f}.'.format(i,loss.item()))
+            print('batch loss: {:.4f}.'.format(loss.item()))
         total_loss /= len(loader.dataset)
         writer.add_scalar("loss", total_loss, epoch)
         print("Epoch {}. Loss: {:.4f}.".format(epoch, total_loss))

@@ -1,3 +1,4 @@
+from urllib.robotparser import RequestRate
 import torch
 import torch.nn as nn
 import torch.nn.functional as F 
@@ -111,7 +112,7 @@ class ModelS(nn.Module):
         return X, S, Aty
 
     
-    def post_mp_one_graph(x,ud_edges,edge_map):
+    def post_mp_one_graph(self,x,ud_edges,edge_map):
         num_nodes = x.shape[0]
         vp = []
         for i in range(num_nodes):
@@ -277,12 +278,15 @@ class ModelS(nn.Module):
         Xopt = data.X
         Sopt = data.S
         Atyopt = data.Aty
+        device = X[0].device
         if self.dual_edge_mlp_output_dim == 16:
             for i in range(num_graphs):
                 loss.append(
-                    torch.norm(X[i] - Xopt[i],p='fro') + torch.norm(S[i] - Sopt[i],p='fro'))
+                    torch.norm(X[i] - torch.tensor(Xopt[i],dtype=torch.float64,device=device,requires_grad=False),p='fro') + \
+                        torch.norm(S[i] - torch.tensor(Sopt[i],dtype=torch.float64,device=device,requires_grad=False),p='fro'))
         elif self.dual_edge_mlp_output_dim == 6:
             for i in range(num_graphs):
                 loss.append(
-                    torch.norm(X[i] - Xopt[i],p='fro') + torch.norm(Aty[i] - Atyopt[i],p='fro'))
-        return torch.mean(torch.tensor(loss))
+                    torch.norm(X[i] - torch.tensor(Xopt[i],dtype=torch.float64,device=device,requires_grad=False),p='fro') + \
+                        torch.norm(Aty[i] - torch.tensor(Atyopt[i],dtype=torch.float64,device=device,requires_grad=False),p='fro'))
+        return torch.mean(torch.stack(loss))
