@@ -61,7 +61,7 @@ class QUASARDataset(Dataset):
 
                 # Create PyG graph data
                 points_aug      = np.concatenate((
-                                                  np.zeros((6,1)),points),axis=1) # add extra one node
+                                                  np.ones((6,1)),points),axis=1) # add extra one node
                 points_aug      = points_aug.T
                 Ctriu           = self.mytriu(C)
                 node_features   = np.concatenate((points_aug,Ctriu),axis=1)
