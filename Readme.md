@@ -15,6 +15,7 @@ This [line](https://github.com/hankyang94/GNNSDP/blob/5b880ff0a0b0af2ccfd5451c28
 - We start with an input fully-connected graph, where each node i has a feature
 [a_k || b_k] of dimension 6
 Optionally, we could use a different input feature that comes from the cost matrix C, see [here](https://github.com/hankyang94/GNNSDP/blob/5b880ff0a0b0af2ccfd5451c28a129379c32b7db/dataset.py#L66).
+We add a dummy node 0 with feature all ones because the size of X and S is 4(N+1), with (N+1) blocks.
 
 - We perform multiple layers of message passing on this input graph, and we generate a graph where each node has a feature f_i with high dimension.
 
@@ -25,10 +26,15 @@ Optionally, we could use a different input feature that comes from the cost matr
     - dual_edge(f_i,f_j), which returns the off-diagonal blocks of S
 
 - We perform supervised learning, where the loss function is:
+
 loss = primal_loss + dual_loss
+
 primal_loss = || X - X_gt || / || X_gt ||
+
 dual_loss = || S - S_gt || / || S_gt ||
+
 where all the norms are Frobenious norms.
 
+A sammple implementation is [here](https://github.com/hankyang94/GNNSDP/blob/87d9697a2aec8ba1be88fac0fd97810df7e3ca73/model.py#L9).
 
 
