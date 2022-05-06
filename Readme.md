@@ -37,6 +37,6 @@ dual_loss = || S - S_gt || / || S_gt ||
 
 where all the norms are Frobenious norms.
 
-A sammple implementation is [here](https://github.com/hankyang94/GNNSDP/blob/87d9697a2aec8ba1be88fac0fd97810df7e3ca73/model.py#L9).
+A sample implementation is [here](https://github.com/hankyang94/GNNSDP/blob/87d9697a2aec8ba1be88fac0fd97810df7e3ca73/model.py#L9).
 
 
