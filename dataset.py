@@ -13,9 +13,13 @@ def gen_index_map(ud_edges,n):
     return map
 
 class QUASARDataset(Dataset):
-    def __init__(self, root, num_graphs, remove_self_loops=True, transform=None, pre_transform=None, pre_filter=None):
+    def __init__(self, root, num_graphs, graph_type=1, remove_self_loops=True, transform=None, pre_transform=None, pre_filter=None):
         self.remove_self_loops = remove_self_loops
         self.num_graphs = num_graphs
+        self.graph_type = graph_type # 1 for fully-connected graph, 2 for star graph
+        if self.graph_type > 2:
+            raise RuntimeError('Data graph type is either fully connected (1) or star (2).')
+        print(f'Data graph type: {graph_type}.')
         super().__init__(root, transform, pre_transform, pre_filter)
         # self.raw_dir = osp.join(root,'raw')
         # self.processed_dir = osp.join(root,'processed')
@@ -67,7 +71,15 @@ class QUASARDataset(Dataset):
                 node_features   = np.concatenate((points_aug,Ctriu),axis=1)
 
                 node_features   = torch.tensor(node_features,dtype=torch.float64) # num_nodes x num_features
-                edge_index      = torch.ones(num_nodes+1,num_nodes+1).nonzero().t().contiguous()
+
+                if self.graph_type == 1: # fully connected graph
+                    edge_index  = torch.ones(num_nodes+1,num_nodes+1).nonzero().t().contiguous()
+                elif self.graph_type == 2: # star graph
+                    first_row = torch.ones(1,num_nodes+1)
+                    first_col = torch.ones(num_nodes,1)
+                    adj_mat = torch.cat((first_row,torch.cat((first_col,torch.eye(num_nodes)),dim=1)),dim=0)
+                    edge_index  = adj_mat.nonzero().t().contiguous()
+
                 if self.remove_self_loops:
                     edge_index  = pyg_utils.remove_self_loops(edge_index)[0]
                 
