@@ -19,7 +19,9 @@ class PrimalModel(nn.Module):
                        primal_edge_mlp_output_dim=10,
                        edge_mlp_num_layers=1, 
                        dropout_rate=0.2,
-                       relu_slope=0.1):
+                       relu_slope=0.1,
+                       residual=False,
+                       batchnorm=False):
         super(PrimalModel,self).__init__()
         if node_feature_mode == 1:
             mp_input_dim = 6 # use original point coordinates
@@ -30,7 +32,9 @@ class PrimalModel(nn.Module):
         else:
             raise RuntimeError('node_feature_mode can only be 1, 2, or 3.')
         self.node_feature_mode = node_feature_mode
-        print(f'Model: node_feature_mode = {node_feature_mode}, mp_input_dim = {mp_input_dim}, relu_slope = {relu_slope}. GNN type: {gnn_type}.')
+        self.residual = residual
+        self.batchnorm = batchnorm
+        print(f'Model: node_feature_mode = {node_feature_mode}, mp_input_dim = {mp_input_dim}, relu_slope = {relu_slope}. GNN type: {gnn_type}. Residual: {residual}. BatchNorm: {batchnorm}.')
         
         # Message passing
         self.mp_convs = nn.ModuleList()
@@ -54,6 +58,13 @@ class PrimalModel(nn.Module):
             for i in range(mp_num_layers):
                 self.mp_convs.append(pyg_nn.GATConv(mp_hidden_dim,mp_hidden_dim))
             self.mp_convs.append(pyg_nn.GATConv(mp_hidden_dim,mp_output_dim))
+        elif gnn_type == 'TransformerConv':
+            self.mp_convs.append(pyg_nn.TransformerConv(mp_input_dim,mp_hidden_dim))
+            for i in range(mp_num_layers):
+                self.mp_convs.append(pyg_nn.TransformerConv(mp_hidden_dim,mp_hidden_dim))
+            self.mp_convs.append(pyg_nn.TransformerConv(mp_hidden_dim,mp_output_dim))
+        if self.batchnorm:
+            self.bn = pyg_nn.BatchNorm(mp_hidden_dim)
 
         # Post message passing
         # Primal node MLP
@@ -87,11 +98,31 @@ class PrimalModel(nn.Module):
             x = x[:,6:] # use cost matrix entries
 
         # Message passing
-        for mp_layer in self.mp_convs[:-1]:
-            x = mp_layer(x,edge_index)
+        if self.residual:
+            # first layer
+            x = self.mp_convs[0](x,edge_index)
+            if self.batchnorm:
+                x = self.bn(x)
             x = F.leaky_relu(x,negative_slope=self.relu_slope)
             x = F.dropout(x,p=self.dropout_rate,training=self.training)
-        x = self.mp_convs[-1](x,edge_index) # last layer no relu and dropout
+            for mp_layer in self.mp_convs[1:-1]:
+                h = x
+                x = mp_layer(x,edge_index)
+                if self.batchnorm:
+                    x = self.bn(x)
+                x = F.leaky_relu(x,negative_slope=self.relu_slope)
+                x = F.dropout(x,p=self.dropout_rate,training=self.training)
+                x = x + h
+            # last layer
+            x = self.mp_convs[-1](x,edge_index)
+        else:
+            for mp_layer in self.mp_convs[:-1]:
+                x = mp_layer(x,edge_index)
+                if self.batchnorm:
+                    x = self.bn(x)
+                x = F.leaky_relu(x,negative_slope=self.relu_slope)
+                x = F.dropout(x,p=self.dropout_rate,training=self.training)
+            x = self.mp_convs[-1](x,edge_index) # last layer no relu and dropout
         
         # Post message passing
         num_graphs = data.num_graphs
