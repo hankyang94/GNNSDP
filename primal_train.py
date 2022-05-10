@@ -39,6 +39,7 @@ def train(dataset,writer,batch_size,num_epoches):
                      relu_slope=0.1)
     print(model)
     model.double() # convert all parameters to double
+    model.load_state_dict(torch.load('./models/primal_model_SAGE_4_64_64_1_1_1000_0.0_2.pth'))
     model.to(device)
     opt = optim.Adam(model.parameters(),lr=0.01)
     # opt = optim.Adam(model.parameters(),lr=0.01,weight_decay=1e-4)
@@ -75,5 +76,5 @@ writer = SummaryWriter("./log/" + datetime.now().strftime("%Y%m%d-%H%M%S"))
 
 model = train(dataset,writer,batch_size,NUM_EPOCHES)
 
-filename = f'./models/primal_model_{GNN_TYPE}_{GNN_LAYER}_{GNN_HIDDEN_DIM}_{GNN_OUT_DIM}_{NODE_MODE}_{DATA_GRAPH_TYPE}_{NUM_EPOCHES}_{DROPOUT*100}_{MLP_LAYER}.pth'
+filename = f'./models/primal_model_{GNN_TYPE}_{GNN_LAYER}_{GNN_HIDDEN_DIM}_{GNN_OUT_DIM}_{NODE_MODE}_{DATA_GRAPH_TYPE}_{NUM_EPOCHES}_{DROPOUT*100}_{MLP_LAYER}_renew.pth'
 torch.save(model.state_dict(),filename)
