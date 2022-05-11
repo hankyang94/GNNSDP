@@ -21,7 +21,8 @@ class PrimalModel(nn.Module):
                        dropout_rate=0.2,
                        relu_slope=0.1,
                        residual=False,
-                       batchnorm=False):
+                       batchnorm=False,
+                       factor=False):
         super(PrimalModel,self).__init__()
         if node_feature_mode == 1:
             mp_input_dim = 6 # use original point coordinates
@@ -34,7 +35,10 @@ class PrimalModel(nn.Module):
         self.node_feature_mode = node_feature_mode
         self.residual = residual
         self.batchnorm = batchnorm
-        print(f'Model: node_feature_mode = {node_feature_mode}, mp_input_dim = {mp_input_dim}, relu_slope = {relu_slope}. GNN type: {gnn_type}. Residual: {residual}. BatchNorm: {batchnorm}.')
+        self.factor = factor
+        print(f'Model: node_feature_mode = {node_feature_mode}, mp_input_dim = {mp_input_dim}, relu_slope = {relu_slope}. GNN type: {gnn_type}. Residual: {residual}. BatchNorm: {batchnorm}. Factor: {factor}.')
+        if factor:
+            primal_node_mlp_output_dim = 4
         
         # Message passing
         self.mp_convs = nn.ModuleList()
@@ -76,15 +80,17 @@ class PrimalModel(nn.Module):
                 nn.Linear(primal_node_mlp_hidden_dim,primal_node_mlp_hidden_dim,dtype=torch.float64))
         self.primal_node_mlp.append(
             nn.Linear(primal_node_mlp_hidden_dim,primal_node_mlp_output_dim,dtype=torch.float64))
-        # Primal edge MLP
-        self.primal_edge_mlp = nn.ModuleList()
-        self.primal_edge_mlp.append(
-            nn.Linear(mp_output_dim,primal_edge_mlp_hidden_dim,dtype=torch.float64))
-        for i in range(edge_mlp_num_layers):
+        
+        if not self.factor:
+            # Primal edge MLP
+            self.primal_edge_mlp = nn.ModuleList()
             self.primal_edge_mlp.append(
-                nn.Linear(primal_edge_mlp_hidden_dim,primal_edge_mlp_hidden_dim,dtype=torch.float64))
-        self.primal_edge_mlp.append(
-            nn.Linear(primal_edge_mlp_hidden_dim,primal_edge_mlp_output_dim,dtype=torch.float64))
+                nn.Linear(mp_output_dim,primal_edge_mlp_hidden_dim,dtype=torch.float64))
+            for i in range(edge_mlp_num_layers):
+                self.primal_edge_mlp.append(
+                    nn.Linear(primal_edge_mlp_hidden_dim,primal_edge_mlp_hidden_dim,dtype=torch.float64))
+            self.primal_edge_mlp.append(
+                nn.Linear(primal_edge_mlp_hidden_dim,primal_edge_mlp_output_dim,dtype=torch.float64))
     
         self.dropout_rate = dropout_rate
         self.relu_slope = relu_slope
@@ -129,11 +135,30 @@ class PrimalModel(nn.Module):
         X = []
         for k in range(num_graphs):
             node_id = torch.arange(ptr[k],ptr[k+1])
-            Xk = self.post_mp_one_graph(x[node_id,:],ud_edges[k],edge_map[k])
+            if self.factor:
+                Xk = self.post_mp_one_graph_factor(x[node_id,:])
+            else:
+                Xk = self.post_mp_one_graph(x[node_id,:],ud_edges[k],edge_map[k])
             X.append(Xk)
 
         return x, X
-   
+    
+    def post_mp_one_graph_factor(self,x):
+        num_nodes = x.shape[0]
+        vp = []
+        for i in range(num_nodes):
+            xi = x[i,:] # feature of i-th node
+            for mlp_layer in self.primal_node_mlp[:-1]:
+                xi = mlp_layer(xi)
+                xi = F.leaky_relu(xi,negative_slope=self.relu_slope)
+                xi = F.dropout(xi,p=self.dropout_rate,training=self.training)
+            xi = self.primal_node_mlp[-1](xi)
+            vp.append(xi)
+        vp = torch.stack(vp) # num_nodes x primal_node_mlp_output_dim 
+        v = vp.view(1,-1)
+        return torch.matmul(v.t(),v)
+
+
     def post_mp_one_graph(self,x,ud_edges,edge_map):
         num_nodes = x.shape[0]
         vp = []

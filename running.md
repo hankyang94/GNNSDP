@@ -2,23 +2,27 @@
 
 --------Running-------
 
-- primal train N30-1000, GNN_LAYER = 4, residual = False, 2000 epoches
 - primal train N30-1000, GNN_LAYER = 6, residual = True, 800 epoches
-    - N30-1000-20220510-182111
+    - N30-1000-20220510-182539
 - primal train N30-1000, GNN_LAYER = 15, residual = True, 800 epoches
-    - N30-1000-20220510-182020
+    - N30-1000-20220510-182646
+- shared train small, GNN_LAYER = 7, GNN_DIM = 64, residual = True, 800 epoches (no scheduler)
 
 
 --------Done------
 
-- dual model, SAGEConv, input_dim=6, 2000 epoches, fully-connected, mlp_layer=2 (0.0743)
+- ***** shared train small, GNN_LAYER = 7, residual = True, 800 epoches (this one has scheduler)
+    - small-20220510-225416
+    - shared_model_small_SAGE_7_True.pth
+
+- ***** dual model, SAGEConv, input_dim=6, 2000 epoches, fully-connected, mlp_layer=2 (0.0743)
 log: 20220509-111854
 model: dual_model_SAGE_4_64_64_1_1_2000_0.0_2.pth
     - GNN_HIDDEN_DIM = 64
     - GNN_OUT_DIM = 64
     - GNN_LAYER = 4
 
-- primal model, SAGEConv, input_dim=6, 1000 epoches, fully-connected, mlp_layer=2, log 20220508-180608 (0.0654)
+- ***** primal model, SAGEConv, input_dim=6, 1000 epoches, fully-connected, mlp_layer=2, log 20220508-180608 (0.0654)
 model: primal_model_SAGE_4_64_64_1_1_1000_0.0_2.pth
     - GNN_HIDDEN_DIM = 64
     - GNN_OUT_DIM = 64

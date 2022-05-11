@@ -1,5 +1,3 @@
-from http.client import ImproperConnectionState
-from sched import scheduler
 import torch
 import torch.nn as nn
 import torch.nn.functional as F 
@@ -19,19 +17,20 @@ from dataset import QUASARDataset
 GNN_TYPE = 'SAGE'
 GNN_HIDDEN_DIM = 64
 GNN_OUT_DIM = 64
-GNN_LAYER = 6
+GNN_LAYER = 7
 NODE_MODE = 1
 DATA_GRAPH_TYPE = 1
-NUM_EPOCHES = 800
+NUM_EPOCHES = 1000
 DROPOUT = 0.0
 MLP_LAYER = 2
 RESIDUAL = True
 BATCHNORM = False
+FACTOR = True
 
 # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-device = torch.device('cuda:2')
+device = torch.device('cuda:0')
 
-def train(dataset,writer,batch_size,num_epoches,modelname=None):
+def train(dataset,writer,batch_size,num_epoches,modelname=None,schedule=False):
     model   = PrimalModel(node_feature_mode=NODE_MODE,
                      gnn_type=GNN_TYPE,
                      mp_hidden_dim=GNN_HIDDEN_DIM,mp_output_dim=GNN_OUT_DIM,mp_num_layers=GNN_LAYER, 
@@ -42,12 +41,18 @@ def train(dataset,writer,batch_size,num_epoches,modelname=None):
                      dropout_rate=DROPOUT,
                      relu_slope=0.1,
                      residual=RESIDUAL,
-                     batchnorm=BATCHNORM)
+                     batchnorm=BATCHNORM,
+                     factor=FACTOR)
     print(model)
+    print(f'Schedule: {schedule}')
+    print(f'modelname: {modelname}')
+    if modelname is not None:
+        print(f'save intermediate models to {modelname}')
     model.double() # convert all parameters to double
     model.to(device)
     opt = optim.Adam(model.parameters(),lr=0.01)
-    scheduler = MultiStepLR(opt,milestones=[int(0.5*num_epoches),int(0.75*num_epoches)],gamma=0.1)
+    if schedule:
+        scheduler = MultiStepLR(opt,milestones=[int(0.5*num_epoches),int(0.75*num_epoches)],gamma=0.1)
     loader = DataLoader(dataset,batch_size=batch_size,shuffle=True)
 
     # train
@@ -66,20 +71,21 @@ def train(dataset,writer,batch_size,num_epoches,modelname=None):
             # print('batch loss: {:.4f}.'.format(primal_loss.item()))
             total_primal_loss += primal_loss.item() * batch.num_graphs
         
-        scheduler.step()
+        if schedule:
+            scheduler.step()
 
         total_primal_loss /= len(loader.dataset)
         print("Epoch {}. Loss: {:.4f}.".format(epoch, total_primal_loss))
 
         writer.add_scalar("primal loss", total_primal_loss, epoch)
 
-        if (modelname is not None) and (epoch > 199) and (epoch % 199 == 1):
+        if (modelname is not None) and (epoch % 199 == 1):
             filename = f'{modelname}_{epoch}.pth'
             torch.save(model.state_dict(),filename)
     return model
 
-setname = 'N30-1000'
-# setname = 'small'
+# setname = 'N30-1000'
+setname = 'small'
 if setname == 'N30-1000':
     num_graphs = 1000
 elif setname == 'small':
@@ -90,7 +96,7 @@ batch_size = 50
 dataset = QUASARDataset(dir,num_graphs=num_graphs,remove_self_loops=True,graph_type=DATA_GRAPH_TYPE)
 writer = SummaryWriter("./log/" + setname + "-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
 
-modelname = f'./models/primal_model_{setname}_{GNN_TYPE}_{GNN_LAYER}_{RESIDUAL}_{BATCHNORM}'
+modelname = f'./models/primal_model_{setname}_{GNN_TYPE}_{GNN_LAYER}_{RESIDUAL}_{BATCHNORM}_factor_{FACTOR}'
 model = train(dataset,writer,batch_size,NUM_EPOCHES)
 
 filename = f'{modelname}.pth'

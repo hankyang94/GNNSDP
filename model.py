@@ -1,3 +1,4 @@
+from sklearn.metrics import log_loss
 import torch
 import torch.nn as nn
 import torch.nn.functional as F 
@@ -16,14 +17,16 @@ class ModelS(nn.Module):
                        primal_node_mlp_output_dim=10,
                        dual_node_mlp_hidden_dim=64,
                        dual_node_mlp_output_dim=10,
-                       node_mlp_num_layers=1,
                        primal_edge_mlp_hidden_dim=64, 
                        primal_edge_mlp_output_dim=10, 
                        dual_edge_mlp_hidden_dim=64, 
                        dual_edge_mlp_output_dim=16, 
-                       edge_mlp_num_layers=1, 
+                       primal_mlp_num_layers=1, 
+                       dual_mlp_num_layers=1,
                        dropout_rate=0.2,
-                       relu_slope=0.1):
+                       relu_slope=0.1,
+                       residual=True,
+                       losspow=2):
         super(ModelS,self).__init__()
         if node_feature_mode == 1:
             mp_input_dim = 6 # use original point coordinates
@@ -34,7 +37,8 @@ class ModelS(nn.Module):
         else:
             raise RuntimeError('node_feature_mode can only be 1, 2, or 3.')
         self.node_feature_mode = node_feature_mode
-        print(f'Model: node_feature_mode = {node_feature_mode}, mp_input_dim = {mp_input_dim}, relu_slope = {relu_slope}. GNN type: {gnn_type}.')
+        self.residual = residual
+        print(f'Model: node_feature_mode = {node_feature_mode}, mp_input_dim = {mp_input_dim}, relu_slope = {relu_slope}. GNN type: {gnn_type}. Residual: {residual}. Losspow: {losspow}.')
         # Message passing
         self.mp_convs = nn.ModuleList()
         if gnn_type == 'GCN':
@@ -63,7 +67,7 @@ class ModelS(nn.Module):
         self.primal_node_mlp = nn.ModuleList()
         self.primal_node_mlp.append(
             nn.Linear(mp_output_dim,primal_node_mlp_hidden_dim,dtype=torch.float64))
-        for i in range(node_mlp_num_layers):
+        for i in range(primal_mlp_num_layers):
             self.primal_node_mlp.append(
                 nn.Linear(primal_node_mlp_hidden_dim,primal_node_mlp_hidden_dim,dtype=torch.float64))
         self.primal_node_mlp.append(
@@ -72,7 +76,7 @@ class ModelS(nn.Module):
         self.dual_node_mlp = nn.ModuleList()
         self.dual_node_mlp.append(
             nn.Linear(mp_output_dim,dual_node_mlp_hidden_dim,dtype=torch.float64))
-        for i in range(node_mlp_num_layers):
+        for i in range(dual_mlp_num_layers):
             self.dual_node_mlp.append(
                 nn.Linear(dual_node_mlp_hidden_dim,dual_node_mlp_hidden_dim,dtype=torch.float64))
         self.dual_node_mlp.append(
@@ -81,7 +85,7 @@ class ModelS(nn.Module):
         self.primal_edge_mlp = nn.ModuleList()
         self.primal_edge_mlp.append(
             nn.Linear(mp_output_dim,primal_edge_mlp_hidden_dim,dtype=torch.float64))
-        for i in range(edge_mlp_num_layers):
+        for i in range(primal_mlp_num_layers):
             self.primal_edge_mlp.append(
                 nn.Linear(primal_edge_mlp_hidden_dim,primal_edge_mlp_hidden_dim,dtype=torch.float64))
         self.primal_edge_mlp.append(
@@ -90,11 +94,13 @@ class ModelS(nn.Module):
         self.dual_edge_mlp = nn.ModuleList()
         self.dual_edge_mlp.append(
             nn.Linear(mp_output_dim,dual_edge_mlp_hidden_dim,dtype=torch.float64))
-        for i in range(edge_mlp_num_layers):
+        for i in range(dual_mlp_num_layers):
             self.dual_edge_mlp.append(
                 nn.Linear(dual_edge_mlp_hidden_dim,dual_edge_mlp_hidden_dim,dtype=torch.float64))
         self.dual_edge_mlp.append(
             nn.Linear(dual_edge_mlp_hidden_dim,dual_edge_mlp_output_dim,dtype=torch.float64))
+
+        self.losspow = losspow
         self.dropout_rate = dropout_rate
         self.dual_edge_mlp_output_dim = dual_edge_mlp_output_dim
         self.relu_slope = relu_slope
@@ -110,11 +116,25 @@ class ModelS(nn.Module):
             x = x[:,6:] # use cost matrix entries
 
         # Message passing
-        for mp_layer in self.mp_convs[:-1]:
-            x = mp_layer(x,edge_index)
+        if self.residual:
+            # first layer
+            x = self.mp_convs[0](x,edge_index)
             x = F.leaky_relu(x,negative_slope=self.relu_slope)
             x = F.dropout(x,p=self.dropout_rate,training=self.training)
-        x = self.mp_convs[-1](x,edge_index) # last layer no relu and dropout
+            for mp_layer in self.mp_convs[1:-1]:
+                h = x
+                x = mp_layer(x,edge_index)
+                x = F.leaky_relu(x,negative_slope=self.relu_slope)
+                x = F.dropout(x,p=self.dropout_rate,training=self.training)
+                x = x + h
+            # last layer
+            x = self.mp_convs[-1](x,edge_index)
+        else:
+            for mp_layer in self.mp_convs[:-1]:
+                x = mp_layer(x,edge_index)
+                x = F.leaky_relu(x,negative_slope=self.relu_slope)
+                x = F.dropout(x,p=self.dropout_rate,training=self.training)
+            x = self.mp_convs[-1](x,edge_index) # last layer no relu and dropout
         
         # Post message passing
         num_graphs = data.num_graphs
@@ -191,7 +211,7 @@ class ModelS(nn.Module):
             Aty = self.recover_Aty(vd,ed,edge_map)
             S = None
         else:
-            raise RuntimeError(f'dual_edge_mlp_output_dim = {dual_edge_mlp_output_dim} not supported.')
+            raise RuntimeError(f'dual_edge_mlp_output_dim = {self.dual_edge_mlp_output_dim} not supported.')
 
         return X, S, Aty
 
@@ -295,7 +315,55 @@ class ModelS(nn.Module):
         Aty = torch.cat(rows,dim=0)
         return Aty
 
-    def loss(self,data,X,S,Aty):
+    def normalized_loss(self,data,X,S,Aty):
+        Xopt = data.X
+        Sopt = data.S
+        Atyopt = data.Aty
+        C = data.C
+        device = X[0].device
+        num_graphs = data.num_graphs
+        primal_loss = []
+        dual_loss = []
+
+        for i in range(num_graphs):
+            Xopti = torch.tensor(Xopt[i],dtype=torch.float64,device=device)
+            primal_loss.append(
+                torch.pow(
+                torch.div(
+                    torch.norm(X[i] - Xopti,p='fro'),
+                    torch.norm(Xopti,p='fro'))
+                ,self.losspow)
+            )
+
+            Ci = torch.tensor(C[i],dtype=torch.float64,device=device)
+            if self.dual_edge_mlp_output_dim == 16:
+                Sopti = torch.div(
+                    torch.tensor(Sopt[i],dtype=torch.float64,device=device),
+                    torch.norm(Ci,p='fro'))
+                
+                dual_loss.append(
+                    torch.pow(
+                    torch.div(
+                        torch.norm(S[i] - Sopti,p='fro'),
+                        torch.norm(Sopti,p='fro'))
+                    ,self.losspow)
+                    )
+            elif self.dual_edge_mlp_output_dim == 6:
+                Atyopti = torch.div(
+                    torch.tensor(Atyopt[i],dtype=torch.float64,device=device),
+                    torch.norm(Ci,p='fro'))
+            
+                dual_loss.append(
+                    torch.pow(
+                    torch.div(
+                        torch.norm(Aty[i] - Atyopti,p='fro'),
+                        torch.norm(Atyopti,p='fro')),
+                        self.losspow)
+                    )
+                
+        return torch.mean(torch.stack(primal_loss)), torch.mean(torch.stack(dual_loss))
+
+    def pd_loss(self,data,X,S,Aty):
         Xopt = data.X
         Sopt = data.S
         Atyopt = data.Aty
@@ -307,26 +375,80 @@ class ModelS(nn.Module):
         for i in range(num_graphs):
             Xopti = torch.tensor(Xopt[i],dtype=torch.float64,device=device)
             primal_loss.append(
+                torch.pow(
                 torch.div(
                     torch.norm(X[i] - Xopti,p='fro'),
                     torch.norm(Xopti,p='fro'))
-                )            
+                ,self.losspow)
+            )
+
             if self.dual_edge_mlp_output_dim == 16:
                 Sopti = torch.tensor(Sopt[i],dtype=torch.float64,device=device)
                 dual_loss.append(
+                    torch.pow(
                     torch.div(
                         torch.norm(S[i] - Sopti,p='fro'),
                         torch.norm(Sopti,p='fro'))
-                    )         
+                    ,self.losspow)
+                    )
             elif self.dual_edge_mlp_output_dim == 6:
                 Atyopti = torch.tensor(Atyopt[i],dtype=torch.float64,device=device)
                 dual_loss.append(
+                    torch.pow(
                     torch.div(
                         torch.norm(Aty[i] - Atyopti,p='fro'),
-                        torch.norm(Atyopti,p='fro'))
-                    )
-                    
+                        torch.norm(Atyopti,p='fro')),
+                        self.losspow)
+                    )              
         return torch.mean(torch.stack(primal_loss)), torch.mean(torch.stack(dual_loss))
+
+    def loss(self,data,X,S,Aty):
+        Xopt = data.X
+        Sopt = data.S
+        Atyopt = data.Aty
+        C = data.C
+        device = X[0].device
+        num_graphs = data.num_graphs
+        primal_loss = []
+        dual_loss = []
+        cmpl_loss = []
+
+        for i in range(num_graphs):
+            Xopti = torch.tensor(Xopt[i],dtype=torch.float64,device=device)
+            primal_loss.append(
+                torch.pow(
+                torch.div(
+                    torch.norm(X[i] - Xopti,p='fro'),
+                    torch.norm(Xopti,p='fro'))
+                ,self.losspow)
+            )
+
+            if self.dual_edge_mlp_output_dim == 16:
+                Sopti = torch.tensor(Sopt[i],dtype=torch.float64,device=device)
+                dual_loss.append(
+                    torch.pow(
+                    torch.div(
+                        torch.norm(S[i] - Sopti,p='fro'),
+                        torch.norm(Sopti,p='fro'))
+                    ,self.losspow)
+                    )
+
+                cmpl_loss.append(
+                    torch.pow(torch.trace(torch.matmul(X[i],S[i])),self.losspow))
+            elif self.dual_edge_mlp_output_dim == 6:
+                Atyopti = torch.tensor(Atyopt[i],dtype=torch.float64,device=device)
+                Ci = torch.tensor(C[i],dtype=torch.float64,device=device)
+                dual_loss.append(
+                    torch.pow(
+                    torch.div(
+                        torch.norm(Aty[i] - Atyopti,p='fro'),
+                        torch.norm(Atyopti,p='fro')),
+                        self.losspow)
+                    )
+                cmpl_loss.append(
+                    torch.pow(torch.trace(torch.matmul(X[i],Ci-Aty[i])),self.losspow))
+                
+        return torch.mean(torch.stack(primal_loss)), torch.mean(torch.stack(dual_loss)), torch.mean(torch.stack(cmpl_loss))
 
     # def loss(self,data,X,S,Aty):
     #     num_graphs = data.num_graphs
