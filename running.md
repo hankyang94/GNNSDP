@@ -2,18 +2,36 @@
 
 --------Running-------
 
-- primal train N30-1000, GNN_LAYER = 6, residual = True, 800 epoches
+- primal train N30-1000, GNN_LAYER = 6, residual = True, 800 epoches, resmode=2
     - N30-1000-20220510-182539
-- primal train N30-1000, GNN_LAYER = 15, residual = True, 800 epoches
-    - N30-1000-20220510-182646
-- shared train small, GNN_LAYER = 7, GNN_DIM = 64, residual = True, 800 epoches (no scheduler)
+    - 200 epoches: train acc: 0.3658, test acc: 0.7006, 0.6991
+    - 400 epoches: 
+
+- primal factor train N30-1000, GNN_LAYER = 3, residual=True, 1000 epoches, resmode=1
+    - N30-1000-20220512-120422
+
+
 
 
 --------Done------
 
+- **** primal model with factor, SAGE, 7-64-64, 1000 epoches, residual, (0.0642)
+    - primal_model_small_SAGE_7_True_False_factor_True.pth
+    - learn nothing: test acc 1.0
+    - 3-64-64 1000 epoches 0.2160 - 1.0491
+    - 1-64-64 600 epoches 0.1590 - 0.9947
+    
+
 - ***** shared train small, GNN_LAYER = 7, residual = True, 800 epoches (this one has scheduler)
     - small-20220510-225416
     - shared_model_small_SAGE_7_True.pth
+
+- shared train small, GNN_LAYER = 7, GNN_DIM = 64, residual = True, 800 epoches (no scheduler)
+    - shared_model_small_SAGE_64_7_True.pth
+    Train primal acc: 0.2880
+    Train dual acc: 0.3227.
+    Test primal acc: 0.9369
+    Test dual acc: 0.3428.
 
 - ***** dual model, SAGEConv, input_dim=6, 2000 epoches, fully-connected, mlp_layer=2 (0.0743)
 log: 20220509-111854
@@ -82,3 +100,6 @@ model primal_model_SAGE_6_64_64_1_1_1000.pth
 - primal factor
 
 - dual factor
+
+- primal train N30-1000, GNN_LAYER = 15, residual = True, 800 epoches
+    - N30-1000-20220510-182646

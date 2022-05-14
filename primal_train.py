@@ -1,3 +1,5 @@
+from random import shuffle
+from nbformat import write
 import torch
 import torch.nn as nn
 import torch.nn.functional as F 
@@ -14,90 +16,107 @@ from datetime import datetime
 from tensorboardX import SummaryWriter
 from dataset import QUASARDataset
 
-GNN_TYPE = 'SAGE'
-GNN_HIDDEN_DIM = 64
-GNN_OUT_DIM = 64
-GNN_LAYER = 7
-NODE_MODE = 1
-DATA_GRAPH_TYPE = 1
-NUM_EPOCHES = 1000
-DROPOUT = 0.0
-MLP_LAYER = 2
-RESIDUAL = True
-BATCHNORM = False
-FACTOR = True
+def train(model,trainset,validateset,
+          writer,batch_size,num_epoches,
+          learning_rate,device,
+          modelname=None,schedule=False):
 
-# device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-device = torch.device('cuda:0')
-
-def train(dataset,writer,batch_size,num_epoches,modelname=None,schedule=False):
-    model   = PrimalModel(node_feature_mode=NODE_MODE,
-                     gnn_type=GNN_TYPE,
-                     mp_hidden_dim=GNN_HIDDEN_DIM,mp_output_dim=GNN_OUT_DIM,mp_num_layers=GNN_LAYER, 
-                     primal_node_mlp_hidden_dim=GNN_OUT_DIM,primal_node_mlp_output_dim=10,
-                     node_mlp_num_layers=MLP_LAYER,
-                     primal_edge_mlp_hidden_dim=GNN_OUT_DIM,primal_edge_mlp_output_dim=10,
-                     edge_mlp_num_layers=MLP_LAYER,
-                     dropout_rate=DROPOUT,
-                     relu_slope=0.1,
-                     residual=RESIDUAL,
-                     batchnorm=BATCHNORM,
-                     factor=FACTOR)
-    print(model)
-    print(f'Schedule: {schedule}')
-    print(f'modelname: {modelname}')
-    if modelname is not None:
-        print(f'save intermediate models to {modelname}')
-    model.double() # convert all parameters to double
+    model.double()
     model.to(device)
-    opt = optim.Adam(model.parameters(),lr=0.01)
+    opt = optim.Adam(model.parameters(),lr=learning_rate)
     if schedule:
         scheduler = MultiStepLR(opt,milestones=[int(0.5*num_epoches),int(0.75*num_epoches)],gamma=0.1)
-    loader = DataLoader(dataset,batch_size=batch_size,shuffle=True)
 
+    train_loader = DataLoader(trainset,batch_size=batch_size,shuffle=True)
     # train
     for epoch in range(num_epoches):
-        total_primal_loss = 0
-
+        total_loss = 0
         model.train()
-        for batch in loader:
+        for batch in train_loader:
             opt.zero_grad()
             batch.to(device)
 
             _, X = model(batch)
-            primal_loss = model.loss(batch,X)
-            primal_loss.backward()
+            loss = model.loss(batch,X)
+            loss.backward()
             opt.step()
-            # print('batch loss: {:.4f}.'.format(primal_loss.item()))
-            total_primal_loss += primal_loss.item() * batch.num_graphs
-        
+            total_loss += loss.item() * batch.num_graphs
         if schedule:
             scheduler.step()
+        total_loss /= len(train_loader.dataset)
+        # validate
+        validate_loss = validate(model,validateset,device)
 
-        total_primal_loss /= len(loader.dataset)
-        print("Epoch {}. Loss: {:.4f}.".format(epoch, total_primal_loss))
+        print("Epoch {}. Train loss: {:.4f}. Validate loss: {:.4f}.".format(
+            epoch, total_loss, validate_loss))
 
-        writer.add_scalar("primal loss", total_primal_loss, epoch)
+        writer.add_scalar("train loss", total_loss, epoch)
+        writer.add_scalar("validate loss", validate_loss, epoch)
 
-        if (modelname is not None) and (epoch % 199 == 1):
+        if (modelname is not None) and (epoch % 200 == 1):
             filename = f'{modelname}_{epoch}.pth'
             torch.save(model.state_dict(),filename)
     return model
 
-# setname = 'N30-1000'
-setname = 'small'
-if setname == 'N30-1000':
-    num_graphs = 1000
-elif setname == 'small':
-    num_graphs = 100
+def validate(model,dataset,device):
+    with torch.no_grad():
+        model.eval()
+        loader = DataLoader(dataset,batch_size=1,shuffle=False)
+        total_loss = 0
+        for batch in loader:
+            batch.to(device)
+            _, X = model(batch)
+            loss = model.loss(batch,X)
+            total_loss += loss.item() * batch.num_graphs
+        total_loss /= len(loader.dataset)
+    return total_loss
 
-dir = f'/home/hank/Datasets/QUASAR/{setname}'
-batch_size = 50
-dataset = QUASARDataset(dir,num_graphs=num_graphs,remove_self_loops=True,graph_type=DATA_GRAPH_TYPE)
-writer = SummaryWriter("./log/" + setname + "-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
+if __name__ == "__main__":
+    GNN_TYPE = 'SAGE'
+    GNN_HIDDEN_DIM = 64
+    GNN_OUT_DIM = 64
+    GNN_LAYER = 9
+    LR = 0.01
+    NODE_MODE = 1
+    DATA_GRAPH_TYPE = 1
+    NUM_EPOCHES = 1000
+    DROPOUT = 0.2
+    MLP_LAYER = 1
+    RESIDUAL = True
+    BATCHNORM = True
+    FACTOR = False
 
-modelname = f'./models/primal_model_{setname}_{GNN_TYPE}_{GNN_LAYER}_{RESIDUAL}_{BATCHNORM}_factor_{FACTOR}'
-model = train(dataset,writer,batch_size,NUM_EPOCHES)
+    DEVICE = torch.device('cuda:2')
 
-filename = f'{modelname}.pth'
-torch.save(model.state_dict(),filename)
+    trainsetname = 'N30-1000'
+    validatesetname = 'N30-100'
+
+    train_dir = f'/home/hank/Datasets/QUASAR/{trainsetname}'
+    validate_dir = f'/home/hank/Datasets/QUASAR/{validatesetname}'
+    batch_size = 50
+    trainset = QUASARDataset(train_dir,num_graphs=1000,remove_self_loops=True,graph_type=DATA_GRAPH_TYPE)
+    validateset = QUASARDataset(validate_dir,num_graphs=100,remove_self_loops=True,graph_type=DATA_GRAPH_TYPE)
+    writer = SummaryWriter("./log/" + trainsetname + "-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
+    modelname = f'./models/primal_model_{trainsetname}_{GNN_TYPE}_{GNN_LAYER}_{RESIDUAL}_{BATCHNORM}_{FACTOR}'
+
+    model = PrimalModel(
+        node_feature_mode=NODE_MODE,
+        gnn_type=GNN_TYPE,
+        mp_hidden_dim=GNN_HIDDEN_DIM,mp_output_dim=GNN_OUT_DIM,mp_num_layers=GNN_LAYER, 
+        primal_node_mlp_hidden_dim=GNN_OUT_DIM,primal_node_mlp_output_dim=10,
+        node_mlp_num_layers=MLP_LAYER,
+        primal_edge_mlp_hidden_dim=GNN_OUT_DIM,primal_edge_mlp_output_dim=10,
+        edge_mlp_num_layers=MLP_LAYER,
+        dropout_rate=DROPOUT,
+        relu_slope=0.1,
+        residual=RESIDUAL,
+        batchnorm=BATCHNORM,
+        factor=FACTOR)
+    print(model)
+
+    model = train(model,trainset,validateset,
+                 writer,batch_size,num_epoches=NUM_EPOCHES,
+                 learning_rate=LR,device=DEVICE,
+                 modelname=modelname,schedule=False)
+    filename = f'{modelname}.pth'
+    torch.save(model.state_dict(),filename)

@@ -22,7 +22,8 @@ class PrimalModel(nn.Module):
                        relu_slope=0.1,
                        residual=False,
                        batchnorm=False,
-                       factor=False):
+                       factor=False,
+                       resmode=1):
         super(PrimalModel,self).__init__()
         if node_feature_mode == 1:
             mp_input_dim = 6 # use original point coordinates
@@ -36,7 +37,10 @@ class PrimalModel(nn.Module):
         self.residual = residual
         self.batchnorm = batchnorm
         self.factor = factor
-        print(f'Model: node_feature_mode = {node_feature_mode}, mp_input_dim = {mp_input_dim}, relu_slope = {relu_slope}. GNN type: {gnn_type}. Residual: {residual}. BatchNorm: {batchnorm}. Factor: {factor}.')
+        self.resmode = resmode
+        if resmode > 2:
+            raise RuntimeError('Res connection be 1 or 2.')
+        print(f'Model: node_feature_mode = {node_feature_mode}, mp_input_dim = {mp_input_dim}, relu_slope = {relu_slope}. GNN type: {gnn_type}. Residual: {residual}. BatchNorm: {batchnorm}. Factor: {factor}. Resmode: {resmode}.')
         if factor:
             primal_node_mlp_output_dim = 4
         
@@ -67,8 +71,6 @@ class PrimalModel(nn.Module):
             for i in range(mp_num_layers):
                 self.mp_convs.append(pyg_nn.TransformerConv(mp_hidden_dim,mp_hidden_dim))
             self.mp_convs.append(pyg_nn.TransformerConv(mp_hidden_dim,mp_output_dim))
-        if self.batchnorm:
-            self.bn = pyg_nn.BatchNorm(mp_hidden_dim)
 
         # Post message passing
         # Primal node MLP
@@ -91,6 +93,11 @@ class PrimalModel(nn.Module):
                     nn.Linear(primal_edge_mlp_hidden_dim,primal_edge_mlp_hidden_dim,dtype=torch.float64))
             self.primal_edge_mlp.append(
                 nn.Linear(primal_edge_mlp_hidden_dim,primal_edge_mlp_output_dim,dtype=torch.float64))
+
+        if self.batchnorm:
+            self.bn_layers = nn.ModuleList()
+            for i in range(mp_num_layers+1):
+                self.bn_layers.append(pyg_nn.BatchNorm(mp_hidden_dim))  
     
         self.dropout_rate = dropout_rate
         self.relu_slope = relu_slope
@@ -107,20 +114,19 @@ class PrimalModel(nn.Module):
         if self.residual:
             # first layer
             x = self.mp_convs[0](x,edge_index)
-            if self.batchnorm:
-                x = self.bn(x)
-            x = F.leaky_relu(x,negative_slope=self.relu_slope)
-            x = F.dropout(x,p=self.dropout_rate,training=self.training)
-            for mp_layer in self.mp_convs[1:-1]:
+            # if self.batchnorm:
+            #     x = self.bn_layers[0](x)
+            # x = F.leaky_relu(x,negative_slope=self.relu_slope)
+            # x = F.dropout(x,p=self.dropout_rate,training=self.training)
+            for layer_id, mp_layer in enumerate(self.mp_convs[1:]):
                 h = x
-                x = mp_layer(x,edge_index)
                 if self.batchnorm:
-                    x = self.bn(x)
-                x = F.leaky_relu(x,negative_slope=self.relu_slope)
-                x = F.dropout(x,p=self.dropout_rate,training=self.training)
-                x = x + h
+                    h = self.bn_layers[layer_id](h)
+                h = F.leaky_relu(h,negative_slope=self.relu_slope)
+                h = F.dropout(h,p=self.dropout_rate,training=self.training)
+                h = mp_layer(h,edge_index)
+                x = h + x
             # last layer
-            x = self.mp_convs[-1](x,edge_index)
         else:
             for mp_layer in self.mp_convs[:-1]:
                 x = mp_layer(x,edge_index)
