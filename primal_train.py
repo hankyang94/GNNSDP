@@ -1,5 +1,3 @@
-from random import shuffle
-from nbformat import write
 import torch
 import torch.nn as nn
 import torch.nn.functional as F 
@@ -74,19 +72,19 @@ def validate(model,dataset,device):
 if __name__ == "__main__":
     GNN_TYPE = 'SAGE'
     GNN_HIDDEN_DIM = 64
-    GNN_OUT_DIM = 64
-    GNN_LAYER = 9
+    GNN_OUT_DIM = GNN_HIDDEN_DIM
+    GNN_LAYER = 7
     LR = 0.01
     NODE_MODE = 1
     DATA_GRAPH_TYPE = 1
     NUM_EPOCHES = 1000
     DROPOUT = 0.2
-    MLP_LAYER = 1
+    MLP_LAYER = 2
     RESIDUAL = True
     BATCHNORM = True
-    FACTOR = False
+    FACTOR = True
 
-    DEVICE = torch.device('cuda:2')
+    DEVICE = torch.device('cuda:0')
 
     trainsetname = 'N30-1000'
     validatesetname = 'N30-100'
@@ -97,7 +95,7 @@ if __name__ == "__main__":
     trainset = QUASARDataset(train_dir,num_graphs=1000,remove_self_loops=True,graph_type=DATA_GRAPH_TYPE)
     validateset = QUASARDataset(validate_dir,num_graphs=100,remove_self_loops=True,graph_type=DATA_GRAPH_TYPE)
     writer = SummaryWriter("./log/" + trainsetname + "-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
-    modelname = f'./models/primal_model_{trainsetname}_{GNN_TYPE}_{GNN_LAYER}_{RESIDUAL}_{BATCHNORM}_{FACTOR}'
+    modelname = f'./models/primal_model_{trainsetname}_{GNN_TYPE}_{GNN_LAYER}_{GNN_HIDDEN_DIM}_{MLP_LAYER}_{RESIDUAL}_{BATCHNORM}_{FACTOR}'
 
     model = PrimalModel(
         node_feature_mode=NODE_MODE,

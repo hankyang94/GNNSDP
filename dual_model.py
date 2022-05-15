@@ -18,7 +18,9 @@ class DualModel(nn.Module):
                        dual_edge_mlp_output_dim=16, 
                        edge_mlp_num_layers=1, 
                        dropout_rate=0.2,
-                       relu_slope=0.1):
+                       relu_slope=0.1,
+                       residual=True,
+                       batchnorm=True):
         super(DualModel,self).__init__()
         if node_feature_mode == 1:
             mp_input_dim = 6 # use original point coordinates
@@ -29,7 +31,9 @@ class DualModel(nn.Module):
         else:
             raise RuntimeError('node_feature_mode can only be 1, 2, or 3.')
         self.node_feature_mode = node_feature_mode
-        print(f'Model: node_feature_mode = {node_feature_mode}, mp_input_dim = {mp_input_dim}, relu_slope = {relu_slope}. GNN type: {gnn_type}.')
+        self.residual = residual
+        self.batchnorm = batchnorm
+        print(f'Model: node_feature_mode = {node_feature_mode}, mp_input_dim = {mp_input_dim}, relu_slope = {relu_slope}. GNN type: {gnn_type}. Residual: {residual}. BatchNorm: {batchnorm}.')
         # Message passing
         self.mp_convs = nn.ModuleList()
         if gnn_type == 'GCN':
@@ -73,6 +77,11 @@ class DualModel(nn.Module):
         self.dual_edge_mlp.append(
             nn.Linear(dual_edge_mlp_hidden_dim,dual_edge_mlp_output_dim,dtype=torch.float64))
 
+        if self.batchnorm:
+            self.bn_layers = nn.ModuleList()
+            for i in range(mp_num_layers+1):
+                self.bn_layers.append(pyg_nn.BatchNorm(mp_hidden_dim))
+        
         self.dropout_rate = dropout_rate
         self.dual_edge_mlp_output_dim = dual_edge_mlp_output_dim
         self.relu_slope = relu_slope
@@ -88,11 +97,25 @@ class DualModel(nn.Module):
             x = x[:,6:] # use cost matrix entries
 
         # Message passing
-        for mp_layer in self.mp_convs[:-1]:
-            x = mp_layer(x,edge_index)
-            x = F.leaky_relu(x,negative_slope=self.relu_slope)
-            x = F.dropout(x,p=self.dropout_rate,training=self.training)
-        x = self.mp_convs[-1](x,edge_index) # last layer no relu and dropout
+        if self.residual:
+            # first layer
+            x = self.mp_convs[0](x,edge_index)
+            for layer_id, mp_layer in enumerate(self.mp_convs[1:]):
+                h = x
+                if self.batchnorm:
+                    h = self.bn_layers[layer_id](h)
+                h = F.leaky_relu(h,negative_slope=self.relu_slope)
+                h = F.dropout(h,p=self.dropout_rate,training=self.training)
+                h = mp_layer(h,edge_index)
+                x = h + x
+        else:
+            for layer_id, mp_layer in enumerate(self.mp_convs[:-1]):
+                x = mp_layer(x,edge_index)
+                if self.batchnorm:
+                    x = self.bn_layers[layer_id](x)
+                x = F.leaky_relu(x,negative_slope=self.relu_slope)
+                x = F.dropout(x,p=self.dropout_rate,training=self.training)
+            x = self.mp_convs[-1](x,edge_index) # last layer no relu and dropout
         
         # Post message passing
         num_graphs = data.num_graphs

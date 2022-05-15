@@ -128,10 +128,10 @@ class PrimalModel(nn.Module):
                 x = h + x
             # last layer
         else:
-            for mp_layer in self.mp_convs[:-1]:
+            for layer_id, mp_layer in enumerate(self.mp_convs[:-1]):
                 x = mp_layer(x,edge_index)
                 if self.batchnorm:
-                    x = self.bn(x)
+                    x = self.bn_layers[layer_id](x)
                 x = F.leaky_relu(x,negative_slope=self.relu_slope)
                 x = F.dropout(x,p=self.dropout_rate,training=self.training)
             x = self.mp_convs[-1](x,edge_index) # last layer no relu and dropout

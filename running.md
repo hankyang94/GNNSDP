@@ -2,6 +2,17 @@
 
 --------Running-------
 
+
+- primal train N30-1000
+    - 9 layers, 64 neurons
+    - MLP 1 hidden layer
+
+- primal factor train N30-1000
+    - 15-64-2
+    - 9-96-2
+    - 15-256-3
+
+
 - primal train N30-1000, GNN_LAYER = 6, residual = True, 800 epoches, resmode=2
     - N30-1000-20220510-182539
     - 200 epoches: train acc: 0.3658, test acc: 0.7006, 0.6991

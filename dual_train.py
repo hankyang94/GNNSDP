@@ -7,73 +7,112 @@ import torch_geometric.nn as pyg_nn
 import torch_geometric.utils as pyg_utils
 from torch_geometric.data import Dataset, Data, DataLoader
 import torch.optim as optim
+from torch.optim.lr_scheduler import MultiStepLR
 import os.path as osp
 import scipy.io as sio
 from datetime import datetime
 from tensorboardX import SummaryWriter
 from dataset import QUASARDataset
 
-GNN_TYPE = 'SAGE'
-GNN_HIDDEN_DIM = 64
-GNN_OUT_DIM = 64
-GNN_LAYER = 4
-NODE_MODE = 1
-DATA_GRAPH_TYPE = 1
-NUM_EPOCHES = 2000
-DROPOUT = 0.0
-MLP_LAYER = 2
+def train(model,trainset,validateset,
+          writer,batch_size,num_epoches,
+          learning_rate,device,
+          modelname=None,schedule=False):
 
-# device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-device = torch.device('cuda:1')
-
-def train(dataset,writer,batch_size,num_epoches):
-    # build model
-    model   = DualModel(node_feature_mode=NODE_MODE,
-                     gnn_type=GNN_TYPE,
-                     mp_hidden_dim=GNN_HIDDEN_DIM,mp_output_dim=GNN_OUT_DIM,mp_num_layers=GNN_LAYER, 
-                     dual_node_mlp_hidden_dim=64,dual_node_mlp_output_dim=10,
-                     node_mlp_num_layers=MLP_LAYER,
-                     dual_edge_mlp_hidden_dim=64,dual_edge_mlp_output_dim=6,
-                     edge_mlp_num_layers=MLP_LAYER, 
-                     dropout_rate=DROPOUT,
-                     relu_slope=0.1)
-    print(model)
-    model.double() # convert all parameters to double
+    model.double()
     model.to(device)
-    opt = optim.Adam(model.parameters(),lr=0.01)
-    # opt = optim.Adam(model.parameters(),lr=0.01,weight_decay=1e-4)
-    loader = DataLoader(dataset,batch_size=batch_size,shuffle=True)
+    opt = optim.Adam(model.parameters(),lr=learning_rate)
+    if schedule:
+        scheduler = MultiStepLR(opt,milestones=[int(0.5*num_epoches),int(0.75*num_epoches)],gamma=0.1)
 
+    train_loader = DataLoader(trainset,batch_size=batch_size,shuffle=True)
     # train
     for epoch in range(num_epoches):
-        total_dual_loss = 0
-
+        total_loss = 0
         model.train()
-        for batch in loader:
+        for batch in train_loader:
             opt.zero_grad()
             batch.to(device)
 
-            x, S, Aty = model(batch)
-            dual_loss = model.loss(batch,S,Aty)
-            dual_loss.backward()
+            _, S, Aty = model(batch)
+            loss = model.loss(batch,S,Aty)
+            loss.backward()
             opt.step()
-            print('batch loss: {:.4f}.'.format(dual_loss.item()))
-            total_dual_loss += dual_loss.item() * batch.num_graphs
-            
-        total_dual_loss /= len(loader.dataset)
-        print("Epoch {}. Loss: {:.4f}.".format(
-            epoch, total_dual_loss))
+            total_loss += loss.item() * batch.num_graphs
+        if schedule:
+            scheduler.step()
+        total_loss /= len(train_loader.dataset)
+        # validate
+        validate_loss = validate(model,validateset,device)
 
-        writer.add_scalar("dual loss", total_dual_loss, epoch)
-        
+        print("Epoch {}. Train loss: {:.4f}. Validate loss: {:.4f}.".format(
+            epoch, total_loss, validate_loss))
+
+        writer.add_scalar("train loss", total_loss, epoch)
+        writer.add_scalar("validate loss", validate_loss, epoch)
+
+        if (modelname is not None) and (epoch % 200 == 1):
+            filename = f'{modelname}_{epoch}.pth'
+            torch.save(model.state_dict(),filename)
     return model
 
-dir = '/home/hank/Datasets/QUASAR/small'
-batch_size = 50
-dataset = QUASARDataset(dir,num_graphs=100,remove_self_loops=True,graph_type=DATA_GRAPH_TYPE)
-writer = SummaryWriter("./log/" + datetime.now().strftime("%Y%m%d-%H%M%S"))
+def validate(model,dataset,device):
+    with torch.no_grad():
+        model.eval()
+        loader = DataLoader(dataset,batch_size=1,shuffle=False)
+        total_loss = 0
+        for batch in loader:
+            batch.to(device)
+            _, S, Aty = model(batch)
+            loss = model.loss(batch,S,Aty)
+            total_loss += loss.item() * batch.num_graphs
+        total_loss /= len(loader.dataset)
+    return total_loss
 
-model = train(dataset,writer,batch_size,NUM_EPOCHES)
+if __name__ == "__main__":
+    GNN_TYPE = 'SAGE'
+    GNN_HIDDEN_DIM = 64
+    GNN_OUT_DIM = GNN_HIDDEN_DIM
+    GNN_LAYER = 7
+    LR = 0.01
+    NODE_MODE = 1
+    DATA_GRAPH_TYPE = 1
+    NUM_EPOCHES = 1000
+    DROPOUT = 0.2
+    MLP_LAYER = 2
+    RESIDUAL = True
+    BATCHNORM = True
 
-filename = f'./models/dual_model_{GNN_TYPE}_{GNN_LAYER}_{GNN_HIDDEN_DIM}_{GNN_OUT_DIM}_{NODE_MODE}_{DATA_GRAPH_TYPE}_{NUM_EPOCHES}_{DROPOUT*100}_{MLP_LAYER}.pth'
-torch.save(model.state_dict(),filename)
+    DEVICE = torch.device('cuda:2')
+
+    trainsetname = 'N30-1000'
+    validatesetname = 'N30-100'
+
+    train_dir = f'/home/hank/Datasets/QUASAR/{trainsetname}'
+    validate_dir = f'/home/hank/Datasets/QUASAR/{validatesetname}'
+    batch_size = 50
+    trainset = QUASARDataset(train_dir,num_graphs=1000,remove_self_loops=True,graph_type=DATA_GRAPH_TYPE)
+    validateset = QUASARDataset(validate_dir,num_graphs=100,remove_self_loops=True,graph_type=DATA_GRAPH_TYPE)
+    writer = SummaryWriter("./log/" + trainsetname + "-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
+    modelname = f'./models/dual_model_{trainsetname}_{GNN_TYPE}_{GNN_LAYER}_{GNN_HIDDEN_DIM}_{MLP_LAYER}_{RESIDUAL}_{BATCHNORM}'
+
+    model = DualModel(
+        node_feature_mode=NODE_MODE,
+        gnn_type=GNN_TYPE,
+        mp_hidden_dim=GNN_HIDDEN_DIM,mp_output_dim=GNN_OUT_DIM,mp_num_layers=GNN_LAYER, 
+        dual_node_mlp_hidden_dim=GNN_OUT_DIM,dual_node_mlp_output_dim=10,
+        node_mlp_num_layers=MLP_LAYER,
+        dual_edge_mlp_hidden_dim=GNN_OUT_DIM,dual_edge_mlp_output_dim=6,
+        edge_mlp_num_layers=MLP_LAYER,
+        dropout_rate=DROPOUT,
+        relu_slope=0.1,
+        residual=RESIDUAL,
+        batchnorm=BATCHNORM)
+    print(model)
+
+    model = train(model,trainset,validateset,
+                 writer,batch_size,num_epoches=NUM_EPOCHES,
+                 learning_rate=LR,device=DEVICE,
+                 modelname=modelname,schedule=False)
+    filename = f'{modelname}.pth'
+    torch.save(model.state_dict(),filename)
