@@ -150,50 +150,47 @@ class PrimalModel(nn.Module):
         return x, X
     
     def post_mp_one_graph_factor(self,x):
-        num_nodes = x.shape[0]
-        vp = []
-        for i in range(num_nodes):
-            xi = x[i,:] # feature of i-th node
-            for mlp_layer in self.primal_node_mlp[:-1]:
-                xi = mlp_layer(xi)
-                xi = F.leaky_relu(xi,negative_slope=self.relu_slope)
-                xi = F.dropout(xi,p=self.dropout_rate,training=self.training)
-            xi = self.primal_node_mlp[-1](xi)
-            vp.append(xi)
-        vp = torch.stack(vp) # num_nodes x primal_node_mlp_output_dim 
-        v = vp.view(1,-1)
-        return torch.matmul(v.t(),v)
-
+        # num_nodes = x.shape[0]
+        # vp = []
+        # for i in range(num_nodes):
+        #     xi = x[i,:] # feature of i-th node
+        #     for mlp_layer in self.primal_node_mlp[:-1]:
+        #         xi = mlp_layer(xi)
+        #         xi = F.leaky_relu(xi,negative_slope=self.relu_slope)
+        #         xi = F.dropout(xi,p=self.dropout_rate,training=self.training)
+        #     xi = self.primal_node_mlp[-1](xi)
+        #     vp.append(xi)
+        # vp = torch.stack(vp) # num_nodes x primal_node_mlp_output_dim 
+        # v = vp.view(1,-1)
+        for mlp_layer in self.primal_node_mlp[:-1]:
+            x = mlp_layer(x)
+            x = F.leaky_relu(x,negative_slope=self.relu_slope)
+            x = F.dropout(x,p=self.dropout_rate,training=self.training)
+        x = self.primal_node_mlp[-1](x)
+        x = x.view(1,-1)
+        return torch.matmul(x.t(),x)
 
     def post_mp_one_graph(self,x,ud_edges,edge_map):
-        num_nodes = x.shape[0]
-        vp = []
-        for i in range(num_nodes):
-            xi = x[i,:] # feature of i-th node
-            for mlp_layer in self.primal_node_mlp[:-1]:
-                xi = mlp_layer(xi)
-                xi = F.leaky_relu(xi,negative_slope=self.relu_slope)
-                xi = F.dropout(xi,p=self.dropout_rate,training=self.training)
-            xi = self.primal_node_mlp[-1](xi)
-            vp.append(xi)
-        vp = torch.stack(vp) # num_nodes x primal_node_mlp_output_dim
-        # Primal edge
-        ep = []
-        for edge in ud_edges:
-            xi  = x[edge[0],:]
-            xj  = x[edge[1],:]
-            xij = xi + xj
-            for mlp_layer in self.primal_edge_mlp[:-1]:
-                xij = mlp_layer(xij)
-                xij = F.leaky_relu(xij,negative_slope=self.relu_slope)
-                xij = F.dropout(xij,p=self.dropout_rate,training=self.training)
-            xij = self.primal_edge_mlp[-1](xij)
-            ep.append(xij)
-        ep = torch.stack(ep)
+        # primal node
+        vp = x
+        for mlp_layer in self.primal_node_mlp[:-1]:
+            vp = mlp_layer(vp)
+            vp = F.leaky_relu(vp,negative_slope=self.relu_slope)
+            vp = F.dropout(vp,p=self.dropout_rate,training=self.training)
+        vp = self.primal_node_mlp[-1](vp)
+        # primal edge
+        ud_edges = torch.tensor(ud_edges,dtype=torch.long,requires_grad=False,device=x.device)
+        xi = x[ud_edges[:,0],:]
+        xj = x[ud_edges[:,1],:]
+        ep = xi + xj
+        for mlp_layer in self.primal_edge_mlp[:-1]:
+            ep = mlp_layer(ep)
+            ep = F.leaky_relu(ep,negative_slope=self.relu_slope)
+            ep = F.dropout(ep,p=self.dropout_rate,training=self.training)
+        ep = self.dual_edge_mlp[-1](ep)
 
         # Recover primal X
         X = self.recover_X(vp,ep,edge_map)
-
         return X
 
     def smat(self,x):
@@ -300,6 +297,7 @@ class PrimalModel(nn.Module):
         device = X[0].device
         num_graphs = data.num_graphs
         primal_loss = []
+        # print('Inside loss: # graphs: {}.'.format(num_graphs))
 
         for i in range(num_graphs):
             Xopti = torch.tensor(Xopt[i],dtype=torch.float64,device=device)

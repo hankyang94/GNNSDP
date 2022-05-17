@@ -1,9 +1,8 @@
-from xmlrpc.client import FastMarshaller
 import torch
 import torch.nn as nn
 import torch.nn.functional as F 
 import numpy as np
-from primal_model import PrimalModel 
+from dual_model import DualModelFtype 
 import torch_geometric.nn as pyg_nn 
 import torch_geometric.utils as pyg_utils
 from torch_geometric.data import Dataset, Data, DataLoader
@@ -35,17 +34,17 @@ def train(model,trainset,validateset,
             opt.zero_grad()
             batch.to(device)
 
-            _, X = model(batch)
-            loss = model.loss(batch,X)
+            _, S, Aty = model(batch)
+            loss = model.loss(batch,S,Aty)
             loss.backward()
             opt.step()
             total_loss += loss.item() * batch.num_graphs
-        total_loss /= len(train_loader.dataset)
         if schedule:
             scheduler.step()
+        total_loss /= len(train_loader.dataset)
         # validate
         validate_loss = validate(model,validateset,device)
-        
+
         print("Epoch {}. Train loss: {:.4f}. Validate loss: {:.4f}.".format(
             epoch, total_loss, validate_loss))
 
@@ -57,15 +56,15 @@ def train(model,trainset,validateset,
             torch.save(model.state_dict(),filename)
     return model
 
-def validate(model,dataset,device,batch_size=1):
+def validate(model,dataset,device):
     with torch.no_grad():
         model.eval()
-        loader = DataLoader(dataset,batch_size=batch_size,shuffle=False)
+        loader = DataLoader(dataset,batch_size=1,shuffle=False)
         total_loss = 0
         for batch in loader:
             batch.to(device)
-            _, X = model(batch)
-            loss = model.loss(batch,X)
+            _, S, Aty = model(batch)
+            loss = model.loss(batch,S,Aty)
             total_loss += loss.item() * batch.num_graphs
         total_loss /= len(loader.dataset)
     return total_loss
@@ -83,7 +82,6 @@ if __name__ == "__main__":
     MLP_LAYER = 2
     RESIDUAL = True
     BATCHNORM = True
-    FACTOR = True
 
     DEVICE = torch.device('cuda:0')
 
@@ -96,21 +94,20 @@ if __name__ == "__main__":
     trainset = QUASARDataset(train_dir,num_graphs=1000,remove_self_loops=True,graph_type=DATA_GRAPH_TYPE)
     validateset = QUASARDataset(validate_dir,num_graphs=100,remove_self_loops=True,graph_type=DATA_GRAPH_TYPE)
     writer = SummaryWriter("./log/" + trainsetname + "-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
-    modelname = f'./models/primal_model_{trainsetname}_{GNN_TYPE}_{GNN_LAYER}_{GNN_HIDDEN_DIM}_{MLP_LAYER}_{RESIDUAL}_{BATCHNORM}_{FACTOR}'
+    modelname = f'./models/dual_model_{trainsetname}_{GNN_TYPE}_{GNN_LAYER}_{GNN_HIDDEN_DIM}_{MLP_LAYER}_{RESIDUAL}_{BATCHNORM}'
 
-    model = PrimalModel(
+    model = DualModelFtype(
         node_feature_mode=NODE_MODE,
         gnn_type=GNN_TYPE,
         mp_hidden_dim=GNN_HIDDEN_DIM,mp_output_dim=GNN_OUT_DIM,mp_num_layers=GNN_LAYER, 
-        primal_node_mlp_hidden_dim=GNN_OUT_DIM,primal_node_mlp_output_dim=10,
+        dual_node_mlp_hidden_dim=GNN_OUT_DIM,dual_node_mlp_output_dim=10,
         node_mlp_num_layers=MLP_LAYER,
-        primal_edge_mlp_hidden_dim=GNN_OUT_DIM,primal_edge_mlp_output_dim=10,
+        dual_edge_mlp_hidden_dim=GNN_OUT_DIM,dual_edge_mlp_output_dim=6,
         edge_mlp_num_layers=MLP_LAYER,
         dropout_rate=DROPOUT,
         relu_slope=0.1,
         residual=RESIDUAL,
-        batchnorm=BATCHNORM,
-        factor=FACTOR)
+        batchnorm=BATCHNORM)
     print(model)
 
     model = train(model,trainset,validateset,
