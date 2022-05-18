@@ -72,20 +72,20 @@ def validate(model,dataset,device,batch_size=1):
 
 if __name__ == "__main__":
     GNN_TYPE = 'SAGE'
-    GNN_HIDDEN_DIM = 64
+    GNN_HIDDEN_DIM = 128
     GNN_OUT_DIM = GNN_HIDDEN_DIM
-    GNN_LAYER = 3
-    LR = 0.01
+    GNN_LAYER = 15
+    LR = 0.0001
     NODE_MODE = 1
     DATA_GRAPH_TYPE = 1
     NUM_EPOCHES = 1000
-    DROPOUT = 0.2
+    DROPOUT = 0.5
     MLP_LAYER = 2
     RESIDUAL = True
     BATCHNORM = True
     FACTOR = True
 
-    DEVICE = torch.device('cuda:0')
+    DEVICE = torch.device('cuda:1')
 
     trainsetname = 'N30-1000'
     validatesetname = 'N30-100'

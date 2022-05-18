@@ -34,8 +34,8 @@ def train(model,trainset,validateset,
             opt.zero_grad()
             batch.to(device)
 
-            _, S, Aty = model(batch)
-            loss = model.loss(batch,S,Aty)
+            _, V, E = model(batch)
+            loss = model.loss(batch,V,E)
             loss.backward()
             opt.step()
             total_loss += loss.item() * batch.num_graphs
@@ -51,20 +51,20 @@ def train(model,trainset,validateset,
         writer.add_scalar("train loss", total_loss, epoch)
         writer.add_scalar("validate loss", validate_loss, epoch)
 
-        if (modelname is not None) and (epoch % 200 == 1):
+        if (modelname is not None) and (epoch % 200 == 1) and (epoch > 1):
             filename = f'{modelname}_{epoch}.pth'
             torch.save(model.state_dict(),filename)
     return model
 
-def validate(model,dataset,device):
+def validate(model,dataset,device,batch_size=1):
     with torch.no_grad():
         model.eval()
-        loader = DataLoader(dataset,batch_size=1,shuffle=False)
+        loader = DataLoader(dataset,batch_size=batch_size,shuffle=False)
         total_loss = 0
         for batch in loader:
             batch.to(device)
-            _, S, Aty = model(batch)
-            loss = model.loss(batch,S,Aty)
+            _, V, E = model(batch)
+            loss = model.loss(batch,V,E)
             total_loss += loss.item() * batch.num_graphs
         total_loss /= len(loader.dataset)
     return total_loss
@@ -73,8 +73,8 @@ if __name__ == "__main__":
     GNN_TYPE = 'SAGE'
     GNN_HIDDEN_DIM = 64
     GNN_OUT_DIM = GNN_HIDDEN_DIM
-    GNN_LAYER = 3
-    LR = 0.01
+    GNN_LAYER = 7
+    LR = 0.005
     NODE_MODE = 1
     DATA_GRAPH_TYPE = 1
     NUM_EPOCHES = 1000

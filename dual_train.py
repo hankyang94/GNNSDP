@@ -56,10 +56,10 @@ def train(model,trainset,validateset,
             torch.save(model.state_dict(),filename)
     return model
 
-def validate(model,dataset,device):
+def validate(model,dataset,device,batch_size=1):
     with torch.no_grad():
         model.eval()
-        loader = DataLoader(dataset,batch_size=1,shuffle=False)
+        loader = DataLoader(dataset,batch_size=batch_size,shuffle=False)
         total_loss = 0
         for batch in loader:
             batch.to(device)

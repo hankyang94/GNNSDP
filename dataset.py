@@ -12,6 +12,95 @@ def gen_index_map(ud_edges,n):
         map[edge[1],edge[0]] = i
     return map
 
+def flatten_X(X,edge_map):
+    n = X.shape[0]
+    N = np.int(n/4)
+    N_e = np.int( (N*(N-1))/2 )
+    v = np.zeros((N,10))
+    e = np.zeros((N_e,10))
+    for i in range(N):
+        for j in range(N):
+            blk = X[4*i:4*i+4,4*j:4*j+4]
+            tmp = np.array([blk[0,0],
+                            blk[0,1],
+                            blk[0,2],
+                            blk[0,3],
+                            blk[1,1],
+                            blk[1,2],
+                            blk[1,3],
+                            blk[2,2],
+                            blk[2,3],
+                            blk[3,3]])
+            if i == j:
+                v[i,:] = tmp
+            elif j > i:
+                id = edge_map[i,j]
+                e[id,:] = tmp
+    return v, e
+
+def flatten_S(S,edge_map):
+    n = S.shape[0]
+    N = np.int(n/4)
+    N_e = np.int( (N*(N-1))/2 )
+    v = np.zeros((N,10))
+    e = np.zeros((N_e,16))
+    for i in range(N):
+        blk = S[4*i:4*i+4,4*i:4*i+4]
+        tmp = np.array([blk[0,0],
+                        blk[0,1],
+                        blk[0,2],
+                        blk[0,3],
+                        blk[1,1],
+                        blk[1,2],
+                        blk[1,3],
+                        blk[2,2],
+                        blk[2,3],
+                        blk[3,3]])
+        v[i,:] = tmp
+    for i in range(N):
+        for j in range(N):
+            if j > i:
+                id = edge_map[i,j]
+                blk = S[4*i:4*i+4,4*j:4*j+4]
+                e[id,:] = np.reshape(blk,(16,))
+    return v, e
+
+def flatten_Aty(Aty,edge_map):
+    n = Aty.shape[0]
+    N = np.int(n/4)
+    N_e = np.int( (N*(N-1))/2 )
+    v = np.zeros((N,10))
+    e = np.zeros((N_e,6))
+    for i in range(N):
+        blk = Aty[4*i:4*i+4,4*i:4*i+4]
+        tmp = np.array([blk[0,0],
+                        blk[0,1],
+                        blk[0,2],
+                        blk[0,3],
+                        blk[1,1],
+                        blk[1,2],
+                        blk[1,3],
+                        blk[2,2],
+                        blk[2,3],
+                        blk[3,3]])
+        v[i,:] = tmp
+    
+    for i in range(N):
+        for j in range(N):
+            if j > i:
+                id = edge_map[i,j]
+                blk = Aty[4*i:4*i+4,4*j:4*j+4]
+                tmp = np.array([
+                    blk[0,1],
+                    blk[0,2],
+                    blk[0,3],
+                    blk[1,2],
+                    blk[1,3],
+                    blk[2,3]
+                ])
+                e[id,:] = tmp
+    return v, e
+
 class QUASARDataset(Dataset):
     def __init__(self, root, num_graphs, graph_type=1, remove_self_loops=True, transform=None, pre_transform=None, pre_filter=None):
         self.remove_self_loops = remove_self_loops
@@ -87,9 +176,10 @@ class QUASARDataset(Dataset):
                     torch.ones(num_nodes+1,num_nodes+1) - torch.eye(num_nodes+1)).nonzero().t().contiguous()
                 ud_edges        = ud_edges.t().tolist()
                 edge_map        = gen_index_map(ud_edges,num_nodes+1)
-                # y               = torch.stack((torch.tensor(Xopt,dtype=torch.float64),
-                #                                torch.tensor(Sopt,dtype=torch.float64),
-                #                                torch.tensor(Aty,dtype=torch.float64)))
+                # flatten
+                Aty_v, Aty_e = flatten_Aty(Aty,edge_map)
+                X_v, X_e = flatten_X(Xopt,edge_map)
+                S_v, S_e = flatten_S(Sopt,edge_map)
 
                 graph           = Data(x=node_features,
                                        edge_index=edge_index,
@@ -98,7 +188,13 @@ class QUASARDataset(Dataset):
                                        X=Xopt,
                                        S=Sopt,
                                        Aty=Aty,
-                                       C=C)
+                                       C=C,
+                                       Aty_v=Aty_v,
+                                       Aty_e=Aty_e,
+                                       X_v=X_v,
+                                       X_e=X_e,
+                                       S_v=S_v,
+                                       S_e=S_e)
 
                 torch.save(graph,osp.join(self.processed_dir,f'data_{count}.pt'))
                 count += 1
@@ -120,31 +216,6 @@ class QUASARDataset(Dataset):
             blk = C[0:4,:][:,4*i:4*i+4]
             x[i,:] = blk[np.triu_indices(4)]
         return x
-
-
-    # def primal_vec(X):
-    #     # expect X to be numpy array of size (4N+4,4N+4)
-    #     n = X.shape[0]
-    #     N = n/4
-    #     node = []
-
-
-    # def svec(S):
-    #     # S is a symmetric matrix in numpy
-    #     n = S.shape[0]
-    #     si, sj = np.meshgrid(np.arange(n), np.arange(n))
-    #     mask_tri = (si >= sj)
-    #     si = si[mask_tri]
-    #     sj = sj[mask_tri]
-
-    #     mask_nondiag = (si > sj)
-    #     data = S[si, sj]
-    #     data[mask_nondiag] *= np.sqrt(2)
-
-    #     return data
-
-
-
 
 if __name__ == "__main__":
     dir        = '/Users/hankyang/Datasets/QUASAR'

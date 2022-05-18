@@ -119,17 +119,17 @@ class DualModelFtype(nn.Module):
         
         # Post message passing
         num_graphs = data.num_graphs
-        S = []
-        Aty = []
+        V = []
+        E = []
         for k in range(num_graphs):
             node_id = torch.arange(ptr[k],ptr[k+1])
-            Sk, Atyk = self.post_mp_one_graph(x[node_id,:],ud_edges[k],edge_map[k])
-            S.append(Sk)
-            Aty.append(Atyk)
-        return x, S, Aty
+            vd, ed = self.post_mp_one_graph(x[node_id,:],ud_edges[k])
+            V.append(vd)
+            E.append(ed)
+            
+        return x, V, E
     
-    def post_mp_one_graph(self,x,ud_edges,edge_map):
-        num_nodes = x.shape[0]
+    def post_mp_one_graph(self,x,ud_edges):
         # Dual node
         vd = x
         for mlp_layer in self.dual_node_mlp[:-1]:
@@ -148,17 +148,34 @@ class DualModelFtype(nn.Module):
             ed = F.dropout(ed,p=self.dropout_rate,training=self.training)
         ed = self.dual_edge_mlp[-1](ed)
 
-        # Recover dual S or Aty
-        if self.dual_edge_mlp_output_dim == 16:
-            S = self.recover_S(vd,ed,edge_map)
-            Aty = None 
-        elif self.dual_edge_mlp_output_dim == 6:
-            Aty = self.recover_Aty(vd,ed,edge_map)
-            S = None
-        else:
-            raise RuntimeError(f'dual_edge_mlp_output_dim = {self.dual_edge_mlp_output_dim} not supported.')
+        return vd, ed
 
-        return S, Aty
+    def recover(self,V,E,data):
+        edge_map = data.edge_map
+        num_graphs = data.num_graphs
+        sol = []
+        if self.dual_edge_mlp_output_dim == 16:
+            for i in range(num_graphs):
+                Si = self.recover_S(V[i],E[i],edge_map[i])
+                sol.append(Si)
+        elif self.dual_edge_mlp_output_dim == 6:
+            for i in range(num_graphs):
+                Atyi = self.recover_Aty(V[i],E[i],edge_map[i])
+                sol.append(Atyi)
+        return sol
+
+
+        # # Recover dual S or Aty
+        # if self.dual_edge_mlp_output_dim == 16:
+        #     S = self.recover_S(vd,ed,edge_map)
+        #     Aty = None 
+        # elif self.dual_edge_mlp_output_dim == 6:
+        #     Aty = self.recover_Aty(vd,ed,edge_map)
+        #     S = None
+        # else:
+        #     raise RuntimeError(f'dual_edge_mlp_output_dim = {self.dual_edge_mlp_output_dim} not supported.')
+
+        # return S, Aty
 
 
     def smat(self,x):
@@ -260,32 +277,26 @@ class DualModelFtype(nn.Module):
         Aty = torch.cat(rows,dim=0)
         return Aty
 
-    def loss(self,data,S,Aty):
-        Sopt = data.S
-        Atyopt = data.Aty
-        if S[0] is not None:
-            device = S[0].device
-        else:
-            device = Aty[0].device
+    def loss(self,data,V,E):
+        device = V[0].device
         num_graphs = data.num_graphs
         dual_loss = []
 
         for i in range(num_graphs):
             if self.dual_edge_mlp_output_dim == 16:
-                Sopti = torch.tensor(Sopt[i],dtype=torch.float64,device=device)
-                dual_loss.append(
-                    torch.div(
-                        torch.norm(S[i] - Sopti,p='fro'),
-                        torch.norm(Sopti,p='fro'))
-                    )         
+                vi = torch.tensor(data.S_v[i],dtype=torch.float64,device=device)
+                ei = torch.tensor(data.S_e[i],dtype=torch.float64,device=device)
             elif self.dual_edge_mlp_output_dim == 6:
-                Atyopti = torch.tensor(Atyopt[i],dtype=torch.float64,device=device)
-                dual_loss.append(
-                    torch.div(
-                        torch.norm(Aty[i] - Atyopti,p='fro'),
-                        torch.norm(Atyopti,p='fro'))
-                    )
-                    
+                vi = torch.tensor(data.Aty_v[i],dtype=torch.float64,device=device)
+                ei = torch.tensor(data.Aty_e[i],dtype=torch.float64,device=device)
+            
+            norm_err = torch.square(torch.norm(V[i]-vi,p='fro')) + \
+                torch.square(torch.norm(E[i]-ei,p='fro'))
+            norm_err = torch.sqrt(norm_err)
+            norm_gt = torch.square(torch.norm(vi,p='fro')) + \
+                torch.square(torch.norm(ei,p='fro'))
+            norm_gt = torch.sqrt(norm_gt)
+            dual_loss.append(torch.div(norm_err,norm_gt))
         return torch.mean(torch.stack(dual_loss))
 
 # Supervised Dual GNN model
