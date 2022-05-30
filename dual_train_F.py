@@ -73,28 +73,31 @@ if __name__ == "__main__":
     GNN_TYPE = 'SAGE'
     GNN_HIDDEN_DIM = 64
     GNN_OUT_DIM = GNN_HIDDEN_DIM
-    GNN_LAYER = 7
+    GNN_LAYER = 15
     LR = 0.005
     NODE_MODE = 1
     DATA_GRAPH_TYPE = 1
-    NUM_EPOCHES = 1000
+    NUM_EPOCHES = 2000
     DROPOUT = 0.2
     MLP_LAYER = 2
+    DUAL_OUT_DIM = 6
     RESIDUAL = True
     BATCHNORM = True
 
     DEVICE = torch.device('cuda:0')
 
-    trainsetname = 'N30-1000'
-    validatesetname = 'N30-100'
+    trainsetname = 'N50-5000'
+    NUM_GRAPHS = 5000
+    trainmatversion = 2 # use h5py to read large .mat file
+    validatesetname = 'N50-100'
 
     train_dir = f'/home/hank/Datasets/QUASAR/{trainsetname}'
     validate_dir = f'/home/hank/Datasets/QUASAR/{validatesetname}'
     batch_size = 50
-    trainset = QUASARDataset(train_dir,num_graphs=1000,remove_self_loops=True,graph_type=DATA_GRAPH_TYPE)
+    trainset = QUASARDataset(train_dir,num_graphs=NUM_GRAPHS,remove_self_loops=True,graph_type=DATA_GRAPH_TYPE,matversion=trainmatversion)
     validateset = QUASARDataset(validate_dir,num_graphs=100,remove_self_loops=True,graph_type=DATA_GRAPH_TYPE)
     writer = SummaryWriter("./log/" + trainsetname + "-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
-    modelname = f'./models/dual_model_{trainsetname}_{GNN_TYPE}_{GNN_LAYER}_{GNN_HIDDEN_DIM}_{MLP_LAYER}_{RESIDUAL}_{BATCHNORM}'
+    modelname = f'./models/dual_model_{trainsetname}_{GNN_TYPE}_{GNN_LAYER}_{GNN_HIDDEN_DIM}_{MLP_LAYER}_{DUAL_OUT_DIM}_{RESIDUAL}_{BATCHNORM}_{NODE_MODE}'
 
     model = DualModelFtype(
         node_feature_mode=NODE_MODE,
@@ -102,13 +105,14 @@ if __name__ == "__main__":
         mp_hidden_dim=GNN_HIDDEN_DIM,mp_output_dim=GNN_OUT_DIM,mp_num_layers=GNN_LAYER, 
         dual_node_mlp_hidden_dim=GNN_OUT_DIM,dual_node_mlp_output_dim=10,
         node_mlp_num_layers=MLP_LAYER,
-        dual_edge_mlp_hidden_dim=GNN_OUT_DIM,dual_edge_mlp_output_dim=6,
+        dual_edge_mlp_hidden_dim=GNN_OUT_DIM,dual_edge_mlp_output_dim=DUAL_OUT_DIM,
         edge_mlp_num_layers=MLP_LAYER,
         dropout_rate=DROPOUT,
         relu_slope=0.1,
         residual=RESIDUAL,
         batchnorm=BATCHNORM)
     print(model)
+    # model.load_state_dict(torch.load('./models/dual_model_N30-3000_SAGE_31_64_2_6_True_True_stage_1.pth'))
 
     model = train(model,trainset,validateset,
                  writer,batch_size,num_epoches=NUM_EPOCHES,

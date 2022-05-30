@@ -28,6 +28,8 @@ class DualModelFtype(nn.Module):
             mp_input_dim = 10 # use entries of cost matrix C
         elif node_feature_mode == 3:
             mp_input_dim = 16 # use both
+        elif node_feature_mode == 4: # use original point coordinates + primal quaternion
+            mp_input_dim = 10
         else:
             raise RuntimeError('node_feature_mode can only be 1, 2, or 3.')
         self.node_feature_mode = node_feature_mode
@@ -94,7 +96,11 @@ class DualModelFtype(nn.Module):
         if self.node_feature_mode == 1:
             x = x[:,0:6] # use point coordinates
         elif self.node_feature_mode == 2:
-            x = x[:,6:] # use cost matrix entries
+            x = x[:,6:16] # use cost matrix entries
+        elif self.node_feature_mode == 4:
+            idx = torch.tensor([0,1,2,3,4,5,16,17,18,19],device=x.device)
+            x = x[:,idx]
+        
 
         # Message passing
         if self.residual:
@@ -292,10 +298,10 @@ class DualModelFtype(nn.Module):
             
             norm_err = torch.square(torch.norm(V[i]-vi,p='fro')) + \
                 torch.square(torch.norm(E[i]-ei,p='fro'))
-            norm_err = torch.sqrt(norm_err)
+            # norm_err = torch.sqrt(norm_err)
             norm_gt = torch.square(torch.norm(vi,p='fro')) + \
                 torch.square(torch.norm(ei,p='fro'))
-            norm_gt = torch.sqrt(norm_gt)
+            # norm_gt = torch.sqrt(norm_gt)
             dual_loss.append(torch.div(norm_err,norm_gt))
         return torch.mean(torch.stack(dual_loss))
 
