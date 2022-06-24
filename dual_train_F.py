@@ -84,16 +84,16 @@ if __name__ == "__main__":
     RESIDUAL = True
     BATCHNORM = True
 
-    DEVICE = torch.device('cuda:0')
+    DEVICE = torch.device('cuda:1')
 
-    trainsetname = 'N50-5000'
-    NUM_GRAPHS = 5000
+    trainsetname = 'N30-50-10000'
+    NUM_GRAPHS = 10000
     trainmatversion = 2 # use h5py to read large .mat file
-    validatesetname = 'N50-100'
+    validatesetname = 'N30-100'
 
     train_dir = f'/home/hank/Datasets/QUASAR/{trainsetname}'
     validate_dir = f'/home/hank/Datasets/QUASAR/{validatesetname}'
-    batch_size = 50
+    batch_size = 100
     trainset = QUASARDataset(train_dir,num_graphs=NUM_GRAPHS,remove_self_loops=True,graph_type=DATA_GRAPH_TYPE,matversion=trainmatversion)
     validateset = QUASARDataset(validate_dir,num_graphs=100,remove_self_loops=True,graph_type=DATA_GRAPH_TYPE)
     writer = SummaryWriter("./log/" + trainsetname + "-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
